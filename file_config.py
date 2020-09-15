@@ -47,11 +47,22 @@ class FileWriter(object):
         os.rename(ftfn, fcfn)
         return fcfn
 
+
+    def do_cors(self, f):
+        f.write("  # enable cors ")
+        with open("cors.cfg","r") as conf:
+            lins = conf.readlines()
+            for line in lins:
+                f.write(line + "\n")
+        f.write("\n")
+
     def _config_contents(self, f, jobid, location, job_config):
         # Work-around dojo not in v5 app images
         f.write('location ^~ %sstreamsx.inet.dojo/ {\n' % location)
         f.write('  proxy_pass https://ajax.googleapis.com/ajax/libs/dojo/1.14.1/;\n')
         f.write('}\n')
+
+        self.do_cors(f)
 
         multi_servers = len(job_config.servers) > 1
         seen_contexts = set()
