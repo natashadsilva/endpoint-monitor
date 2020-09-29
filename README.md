@@ -21,6 +21,8 @@ Here's a diagram showing the interaction of clients, endpoint-monitor and Stream
 
 <img width="932" alt="image" src="https://user-images.githubusercontent.com/3769612/68225608-8b1b0000-ffa5-11e9-895e-331a0acebb51.png">
 
+To view an example application, click [here](./docs/example/example.md)
+
 ## Streams application endpoints
 
 The Streams application containing endpoints must be submitted to a job group that the endpoint-monitor is configured to monitor. See Setup.
@@ -84,6 +86,12 @@ stream<Json> locations = com.ibm.streamsx.inet.rest::HTTPJSONInjection() {
 
 ## Setup
 
+> **Tip**: You can run the `setupProxy.sh` script which has automated these steps. The only step you would need to do manually is create the job group in the Streams Console.
+> * Download the script `wget https://raw.githubusercontent.com/IBMStreams/endpoint-monitor/develop/setupProxy.sh`
+> * Change permissions to make it executable `chmod +x ./setupProxy.sh`
+> * Run `./setupProxy.sh`
+
+
 Pick a name for the application (e.g. `buses-em`), this will be passed to *oc new-app* as the parameter `NAME` and will also be the name of the Kubernetes service exposing the REST endpoints.
 
 This name is referred to a `${NAME}` in the following steps.
@@ -118,12 +126,13 @@ The name of the secret is used in step 5 as the `STREAMS_USER_SECRET` parameter.
 
 ### 2. Define images
 
-If your `openshift` project does not contain the image `nginx:1.14` then add it using.
+If your `openshift` project does not contain the image `nginx:1.14` or the python:3.6 images then add either of them  using:
 
 ```
 oc login system:admin
 oc project openshift
 oc tag docker.io/centos/nginx-114-centos7:latest nginx:1.14
+oc tag docker.io/centos/python-36-centos7:latest python:3.6
 ```
 
 If image `nginx:1.14` is not in project `openshift`, make sure that one project contains the image.
@@ -138,13 +147,13 @@ By default the endpoint-monitor's RESTful service **does not require authenticat
 
 Basic authentication can be configured for all requests.
 
-Click here to see details on [basic authentication](https://github.com/IBMStreams/endpoint-monitor/blob/develop/docs/BASICAUTH.md)
+Click here to see details on [basic authentication](./docs/BASICAUTH.md)
 
 #### Webhook signature authentication
 
 Requests with a body can be authenticated using a signature and a shared secret.
 
-Click here to see details on [enabling signature authentication](https://github.com/IBMStreams/endpoint-monitor/blob/develop/docs/signature_auth.md)
+Click here to see details on [enabling signature authentication](./docs/signature_auth.md)
 
 Signature authentication can be an additional layer to other authentication mechanisms, such as basic authenication.
 
@@ -152,9 +161,13 @@ Signature authentication can be an additional layer to other authentication mech
 
 Optional - Create a kubernetes generic secret `${NAME}-streams-certs` that defines certificates to enable HTTPS between the Nginx reverse proxy and the endpoints within the Streams jobs.
 
-Click here to see details on [creating the certificates secret](https://github.com/IBMStreams/endpoint-monitor/blob/develop/docs/JETTYCERTS.md).
+Click here to see details on [creating the certificates secret](./docs/JETTYCERTS.md).
 
 ### 5. Deploy application
+
+#### Create a job group in the Streams instance first
+
+From the Streams console application dashboard, open the menu, expand the instance, select Job Groups, and  click **Make job group**. Provide a name, such as "WebApps".
 
 Using an Openshift cluster run `oc new-app` to build and deploy the *endpoint-monitor* application. Use the same project where the streams is installed.
 The following command creates a *endpoint-monitor* application with name *streams-endpoint-monitor*
@@ -163,11 +176,11 @@ The following command creates a *endpoint-monitor* application with name *stream
 oc new-app \
  -f https://raw.githubusercontent.com/IBMStreams/endpoint-monitor/develop/openshift/templates/streams-endpoints.json \
  -p STREAMS_INSTANCE_NAME=<IBMStreamsInstance name> \
- -p JOB_GROUP=<job group pattern> \
+ -p JOB_GROUP=<job group> \
 ```
 
 * `STREAMS_INSTANCE_NAME` - Name of the Kubernetes object `IBMStreamsInstance` defined in the yaml file when creating the Streams instance.
-* `JOB_GROUP` - Job group pattern. Only jobs with groups that match this pattern will be monitored for REST operators. **Currently only a actual job group can be supplied, not a regular expression.**
+* `JOB_GROUP` - Job group name. Only jobs submitted to the specified group will be monitored for REST operators. **Currently only a actual job group can be supplied, not a regular expression.** 
 
 The command may be used with additional parameters:
 * `NAME` - Name of the openshift/kubernetes service that provides access to the REST endpoint, defaults to `streams-endpoint-monitor`
@@ -177,11 +190,11 @@ The command may be used with additional parameters:
 
 ### 6. Create a Route
 
-Create a route where the service is exposed. Use the Openshift Console and use menue:
+Create a route where the service is exposed. Use the Openshift Console and use menu:
 ```
 Networking -> Routes -> Create Route
 ```
-Chose you created service with `${NAME}` and choose as TLS Termination `Passthrough`.
+Choose your created service with `${NAME}` and choose as TLS Termination `Passthrough`.
 Public hostname for the route. If not specified, a hostname is generated.
 
 ## URL mapping
@@ -214,15 +227,15 @@ The path `swagger-ui.html` (e.g. `https://buses-em.myproject.svc:8443/swagger-ui
 
 ## Implementation notes
 
-The template uses the nginx and python 3.6 source to image (s2i) setups to define two containers (nginx & python) within a single pod. The two containers share a local volume (`/opt/streams_job_configs`) and communicate through a named pipe on the volume.
+The template uses the nginx and python 3.6 source to image (s2i) setups to define two containers (nginx & python) within a single pod. The two containers share a local volume (`/var/opt/streams-endpoint-monitor`) and communicate through a named pipe on the volume.
  * nginx 1.14 s2i - https://github.com/sclorg/nginx-container/tree/master/1.14
  * python 3.6 s2i - https://github.com/sclorg/s2i-python-container/tree/master/3.6
 
-The python container monitors the Streams instance using the REST api through its sws service and as jobs are submitted and canceled it updates each job's reverse proxy configuration in `/opt/streams_job_configs`. Once a job configuration has been written it sends a `reload` action through the named pipe.
+The python container monitors the Streams instance using the REST api through its sws service and as jobs are submitted and canceled it updates each job's reverse proxy configuration in `/var/opt/streams-endpoint-monitor/job-configs/`. Once a job configuration has been written it sends a `reload` action through the named pipe.
 
  * `https://em.myoproject.svc:8443/streams/jobs/7/ports/info` with a web-server in job 7:
 
 
-The nginx container runs nginx pulling configuration from job endpoint `/opt/streams_job_configs/*.conf`. It also has a shell script that monitors the named pipe and executes its actions using `nginx -s`, e.g. `nginx -s reload`. (currently only `reload` is sent as an action).
+The nginx container runs nginx pulling configuration from job endpoint `/var/opt/streams-endpoint-monitor/job-configs/*.conf`. It also has a shell script that monitors the named pipe and executes its actions using `nginx -s`, e.g. `nginx -s reload`. (currently only `reload` is sent as an action).
 
-Click here to see the internal details on how [signature authentication](https://github.com/IBMStreams/endpoint-monitor/blob/develop/docs/internal/signature_verification.md) works
+Click here to see the internal details on how [signature authentication](./docs/internal/signature_verification.md) works
